@@ -1,0 +1,10 @@
+[package]
+name = "rem-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# licence.workspace = true
+
+[dependencies]
+rem-core = { path = "../rem-core" }
+rem-rpc = { path = "../rem-rpc" }

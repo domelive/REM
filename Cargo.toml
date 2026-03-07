@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "crates/rem-core",
+    "crates/rem-rpc",
+    "crates/rem-plugin",
+    "crates/rem-tui",
+    "crates/rem-gui",
+    "crates/rem-cli",
+]
+
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Domenico Livera <domenico.livera@gmail.com>"]
+edition = "2024"
+# licence = "GPL-3.0-or-later"
+repository = "https://github.com/domelive/REM.git"
