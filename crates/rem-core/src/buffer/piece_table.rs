@@ -7,6 +7,10 @@
 //! The Piece Table maintains a list of pieces that reference either buffer, allowing for efficient
 //! text manipulation without needing to copy large amounts of data.
 
+// ================================================================
+// Data structures for the Piece Table implementation.
+// ================================================================
+
 /// Enum to identify which buffer a piece references.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BufferID {
@@ -37,6 +41,9 @@ pub struct PieceTable {
     pieces:          Vec<Piece>, 
 }
 
+// ================================================================
+// Public methods for the PieceTable struct.
+// ================================================================
 impl PieceTable {
     pub fn new(text: String) -> Self {
         let length = text.len();
@@ -61,55 +68,49 @@ impl PieceTable {
     pub fn insert(&mut self, offset: usize, text: &str) {
         if text.is_empty() { return; }
 
-        let new_text_start = self.add_buffer.len();
+        // Add the new text to the add buffer and keep track of its length before the addition to
+        // calculate the starting index for the new piece.
+        let text_len_before_add = self.add_buffer.len();
         self.add_buffer.push_str(text);
 
-        let mut logical_offset = 0;
-        let mut relative_offset = 0;
-        let mut target_idx = 0;
-
-        for (idx, piece) in self.pieces.iter().enumerate() {
-            if logical_offset + piece.length >= offset {
-                target_idx = idx;
-                relative_offset = offset - logical_offset;
-                break;
-            }
-
-            logical_offset += piece.length;
-        }
-
+        // Find the target piece and the relative offset within that piece where the new text will
+        // be inserted. This will help us determine how to split the existing piece to accommodate
+        // the new text.
+        let (target_idx, relative_offset) = self.find_piece_idx_from_offset(offset);
         let target_piece = self.pieces[target_idx];
 
-        let left_piece = Piece {
-            buffer_id: target_piece.buffer_id,
-            start_idx: target_piece.start_idx,
-            length: relative_offset,
-        };
+        // Split the target piece into three pieces: left, middle, and right.
+        let (left_piece, middle_piece, right_piece) = self.split_piece(target_piece, relative_offset, text_len_before_add, text.len());
 
-        let middle_piece = Piece {
-            buffer_id: BufferID::Add,
-            start_idx: new_text_start,
-            length: text.len(),
-        };
+        // Create a new list of pieces by replacing the target piece with the new pieces resulting
+        // from the split.
+        let new_pieces = [left_piece, middle_piece, right_piece].into_iter()
+            .filter(|p| p.length > 0)
+            .collect::<Vec<_>>();
 
-        let right_piece = Piece {
-            buffer_id: target_piece.buffer_id,
-            start_idx: target_piece.start_idx + relative_offset,
-            length: target_piece.length - relative_offset,
-        };
-
-        let mut new_pieces = Vec::new();
-        if left_piece.length > 0 { new_pieces.push(left_piece); }
-        new_pieces.push(middle_piece);
-        if right_piece.length > 0 { new_pieces.push(right_piece); }
-
+        // Update the pieces by replacing the target piece with the new pieces. This effectively
+        // Inserts the new text into the logical view of the text without modifying the underlying
+        // buffers.
         self.pieces.splice(target_idx..=target_idx, new_pieces);
     }
 
+    /// Deletes text from the specified offset and length. This method will update the pieces to
+    /// reflect the deletion, effectively removing the specified range of text from the logical
+    /// view without modifying the underlying buffers.
+    ///
+    /// # Arguments
+    /// - `offset`: The starting position of the text to be deleted.
+    /// - `length`: The number of characters to delete from the specified offset.
     pub fn delete(&mut self, offset: usize, length: usize) {
         todo!()
     }
 
+    /// Retrieves the full text represented by the piece table by concatenating the pieces from
+    /// both buffers. This method iterates through the pieces and constructs the final text based
+    /// on the buffer references.
+    ///
+    /// # Returns
+    /// A `String` containing the full text represented by the piece table.
     pub fn get_text(&self) -> String {
         let total_length: usize = self.pieces.iter().map(|piece| piece.length).sum();
 
@@ -122,6 +123,9 @@ impl PieceTable {
 
             let end_idx = piece.start_idx + piece.length;
 
+            // Depending on which buffer the piece references, we append the corresponding
+            // substring to the final text. This allows us to reconstruct the full text based on
+            // the pieces and their references to the original and add buffers.
             match piece.buffer_id {
                 BufferID::Original => {
                     text.push_str(&self.original_buffer[piece.start_idx..end_idx]);
@@ -136,6 +140,80 @@ impl PieceTable {
     }
 }
 
+// ================================================================
+// Private helper methods for the PieceTable struct.
+// ================================================================
+impl PieceTable {
+    /// Splits a target piece into three pieces: left, middle, and right. The left piece represents
+    /// the portion of the original piece before the insertion point, the middle piece represents
+    /// the newly inserted text, and the right piece represents the portion of the original piece
+    /// after the insertion point.
+    ///
+    /// # Arguments
+    /// - `target_piece`: The piece that is being split to accommodate the new insertion.
+    /// - `relative_offset`: The offset within the target piece where the new text is being inserted.
+    /// - `text_len_before_add`: The length of the add buffer before the newly inserted text is added, used to calculate the starting index for the middle piece.
+    ///
+    /// # Returns
+    /// A tuple containing the left piece, middle piece, and right piece resulting from the split.
+    fn split_piece(&self, target_piece: Piece, relative_offset: usize, text_len_before_add: usize, text_len: usize) -> (Piece, Piece, Piece) {
+        let left_piece = Piece {
+            buffer_id: target_piece.buffer_id,
+            start_idx: target_piece.start_idx,
+            length: relative_offset,
+        };
+
+        let middle_piece = Piece {
+            buffer_id: BufferID::Add,
+            start_idx: text_len_before_add,
+            length: text_len,
+        };
+
+        let right_piece = Piece {
+            buffer_id: target_piece.buffer_id,
+            start_idx: target_piece.start_idx + relative_offset,
+            length: target_piece.length - relative_offset,
+        };
+
+        (left_piece, middle_piece, right_piece)
+    }
+
+    /// Finds the index of the piece that contains the specified offset and calculates the relative_offset
+    /// within that piece. This method iterates through the pieces, keeping track of the cumulative
+    /// length until it finds the piece that contains the offset.
+    ///
+    /// # Arguments
+    /// - `offset`: The position in the text for which to find the corresponding piece index and relative offset.
+    ///
+    /// # Returns
+    /// A tuple containing the index of the piece that contains the offset and the relative offset within that piece.
+    fn find_piece_idx_from_offset(&self, offset: usize) -> (usize, usize) {
+        // logical offset represents the cumulative length of the pieces as we iterate through
+        // them.
+        let mut logical_offset = 0;
+
+        // relative_offset will be the offset within the target piece where the new text will be
+        // inserted.
+        let mut relative_offset = 0;
+        
+        let mut target_idx = 0;
+        for (idx, piece) in self.pieces.iter().enumerate() {
+            if logical_offset + piece.length >= offset {
+                target_idx = idx;
+                relative_offset = offset - logical_offset;
+                break;
+            }
+
+            logical_offset += piece.length;
+        }
+
+        (target_idx, relative_offset)
+    }
+}
+
+// ================================================================
+// Unit tests for the PieceTable implementation.
+// ================================================================
 #[cfg(test)]
 mod tests {
     use super::*;
