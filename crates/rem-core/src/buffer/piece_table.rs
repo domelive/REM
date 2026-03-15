@@ -1,5 +1,5 @@
 //! Piece Table implementation for efficient text editing.
-//! 
+//!
 //! This implementation allows for efficient insertions and deletions by maintaining two buffers:
 //! - Original Buffer: Contains the initial text.
 //! - Add Buffer: Contains all the inserted text.
@@ -26,7 +26,7 @@ pub struct Piece {
     /// The starting index in the referenced buffer where this piece begins.
     pub start_idx: usize,
     /// The length of the piece, indicating how many characters it spans in the referenced buffer.
-    pub length:    usize,
+    pub length: usize,
 }
 
 /// The main struct for the Piece Table, containing the original buffer, add buffer, and the list
@@ -34,11 +34,11 @@ pub struct Piece {
 /// efficiently.
 pub struct PieceTable {
     // The original text buffer, which remains unchanged after initialization.
-    original_buffer: String, 
+    original_buffer: String,
     // The buffer that accumulates all inserted text, allowing for efficient insertions without modifying the original buffer.
-    add_buffer:      String, 
+    add_buffer: String,
     // A list of pieces that reference either the original buffer or the add buffer, allowing for efficient text manipulation.
-    pieces:          Vec<Piece>, 
+    pieces: Vec<Piece>,
 }
 
 // ================================================================
@@ -48,14 +48,14 @@ impl PieceTable {
     pub fn new(text: String) -> Self {
         let length = text.len();
 
-        Self { 
-            original_buffer: text, 
-            add_buffer: String::new(), 
+        Self {
+            original_buffer: text,
+            add_buffer: String::new(),
             pieces: vec![Piece {
                 buffer_id: BufferID::Original,
                 start_idx: 0,
                 length,
-            }]
+            }],
         }
     }
 
@@ -66,7 +66,9 @@ impl PieceTable {
     /// - `offset`: The position in the text where the new text should be inserted.
     /// - `text`: The text to be inserted.
     pub fn insert(&mut self, offset: usize, text: &str) {
-        if text.is_empty() { return; }
+        if text.is_empty() {
+            return;
+        }
 
         // Add the new text to the add buffer and keep track of its length before the addition to
         // calculate the starting index for the new piece.
@@ -80,11 +82,17 @@ impl PieceTable {
         let target_piece = self.pieces[target_idx];
 
         // Split the target piece into three pieces: left, middle, and right.
-        let (left_piece, middle_piece, right_piece) = self.split_piece(target_piece, relative_offset, text_len_before_add, text.len());
+        let (left_piece, middle_piece, right_piece) = self.split_piece(
+            target_piece,
+            relative_offset,
+            text_len_before_add,
+            text.len(),
+        );
 
         // Create a new list of pieces by replacing the target piece with the new pieces resulting
         // from the split.
-        let new_pieces = [left_piece, middle_piece, right_piece].into_iter()
+        let new_pieces = [left_piece, middle_piece, right_piece]
+            .into_iter()
             .filter(|p| p.length > 0)
             .collect::<Vec<_>>();
 
@@ -102,7 +110,59 @@ impl PieceTable {
     /// - `offset`: The starting position of the text to be deleted.
     /// - `length`: The number of characters to delete from the specified offset.
     pub fn delete(&mut self, offset: usize, length: usize) {
-        todo!()
+        if length == 0 {
+            return;
+        }
+
+        // Create a new list of pieces by iterating through the existing pieces and determining how
+        // they are affected by the deletion.
+        let mut new_pieces = Vec::with_capacity(self.pieces.len());
+        let mut current_offset = 0;
+
+        let delete_start = offset;
+        let delete_end = offset + length;
+
+        for piece in &self.pieces {
+            let piece_start = current_offset;
+            let piece_end = current_offset + piece.length;
+
+            // If the piece is completely outside the deletion range, we keep it as is.
+            if piece_end <= delete_start || piece_start >= delete_end {
+                new_pieces.push(*piece);
+            }
+            // If the piece overlaps with the deletion range, we need to adjust it accordingly.
+            else {
+                // If the piece starts before the deletion range, we keep the left part of the
+                // piece that is outside the deletion range.
+                if piece_start < delete_start {
+                    let left_length = delete_start - piece_start;
+                    new_pieces.push(Piece {
+                        buffer_id: piece.buffer_id,
+                        start_idx: piece.start_idx,
+                        length: left_length,
+                    });
+                }
+
+                // If the piece ends after the deletion range, we keep the right part of the piece
+                // that is outside the deletion range.
+                if piece_end > delete_end {
+                    let right_lenght = piece_end - delete_end;
+                    let right_start = piece.start_idx + (delete_end - piece_start);
+                    new_pieces.push(Piece {
+                        buffer_id: piece.buffer_id,
+                        start_idx: right_start,
+                        length: right_lenght,
+                    });
+                }
+            }
+
+            current_offset += piece.length;
+        }
+
+        // Update the pieces with the new list of pieces that reflects the deletion. This
+        // effectively removes the specified range of text from the logical view without modifying
+        // the underlying buffers.
+        self.pieces = new_pieces;
     }
 
     /// Retrieves the full text represented by the piece table by concatenating the pieces from
@@ -129,7 +189,7 @@ impl PieceTable {
             match piece.buffer_id {
                 BufferID::Original => {
                     text.push_str(&self.original_buffer[piece.start_idx..end_idx]);
-                },
+                }
                 BufferID::Add => {
                     text.push_str(&self.add_buffer[piece.start_idx..end_idx]);
                 }
@@ -156,7 +216,13 @@ impl PieceTable {
     ///
     /// # Returns
     /// A tuple containing the left piece, middle piece, and right piece resulting from the split.
-    fn split_piece(&self, target_piece: Piece, relative_offset: usize, text_len_before_add: usize, text_len: usize) -> (Piece, Piece, Piece) {
+    fn split_piece(
+        &self,
+        target_piece: Piece,
+        relative_offset: usize,
+        text_len_before_add: usize,
+        text_len: usize,
+    ) -> (Piece, Piece, Piece) {
         let left_piece = Piece {
             buffer_id: target_piece.buffer_id,
             start_idx: target_piece.start_idx,
@@ -195,7 +261,7 @@ impl PieceTable {
         // relative_offset will be the offset within the target piece where the new text will be
         // inserted.
         let mut relative_offset = 0;
-        
+
         let mut target_idx = 0;
         for (idx, piece) in self.pieces.iter().enumerate() {
             if logical_offset + piece.length >= offset {
@@ -221,9 +287,13 @@ mod tests {
     #[test]
     fn test_basic_insertion() {
         let mut pt = PieceTable::new("Hello World".to_string());
-        
+
         pt.insert(5, " Beautiful");
-        assert_eq!(pt.get_text(), "Hello Beautiful World", "L'inserimento a metà ha fallito");
+        assert_eq!(
+            pt.get_text(),
+            "Hello Beautiful World",
+            "L'inserimento a metà ha fallito"
+        );
     }
 
     #[test]
@@ -241,12 +311,42 @@ mod tests {
     #[test]
     fn test_multiple_overlapping_inserts() {
         let mut pt = PieceTable::new("".to_string());
-        
+
         pt.insert(0, "a");
         pt.insert(1, "c");
-        
-        pt.insert(1, "b"); 
-        
-        assert_eq!(pt.get_text(), "abc", "La gestione degli indici relativi ha fallito");
+
+        pt.insert(1, "b");
+
+        assert_eq!(
+            pt.get_text(),
+            "abc",
+            "La gestione degli indici relativi ha fallito"
+        );
+    }
+
+    #[test]
+    fn test_delete_trimming() {
+        let mut pt = PieceTable::new("Hello World".to_string());
+
+        pt.delete(5, 6);
+        assert_eq!(pt.get_text(), "Hello");
+    }
+
+    #[test]
+    fn test_delete_hole_in_middle() {
+        let mut pt = PieceTable::new("Beautiful".to_string());
+
+        pt.delete(3, 3);
+        assert_eq!(pt.get_text(), "Beaful");
+    }
+
+    #[test]
+    fn test_delete_spanning_multiple_pieces() {
+        let mut pt = PieceTable::new("Hello".to_string());
+        pt.insert(5, " Beautiful");
+        pt.insert(15, " World");
+
+        pt.delete(3, 6);
+        assert_eq!(pt.get_text(), "Helutiful World");
     }
 }
