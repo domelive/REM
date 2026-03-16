@@ -6,3 +6,4 @@ authors.workspace = true
 
 # licence.workspace = true
 [dependencies]
+rem-rpc = { path = "../rem-rpc" }

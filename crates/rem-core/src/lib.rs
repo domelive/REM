@@ -1,3 +1,4 @@
-pub mod buffer;
+pub mod editor;
+pub mod piece_table;
 
-pub use buffer::piece_table::PieceTable;
+pub use piece_table::PieceTable;
