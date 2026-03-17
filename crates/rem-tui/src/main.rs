@@ -39,12 +39,17 @@ fn main() -> Result<(), io::Error> {
     let mut render_text = String::new();
     let mut is_running = true;
 
+    let mut current_cursor_x = 0;
+    let mut current_cursor_y = 0;
+
     while is_running {
         // Check for any responses from the core editor logic and update the UI state accordingly.
         while let Ok(response) = ui_rx.try_recv() {
             match response {
-                RpcResponse::Render { text, cursor_x, .. } => {
+                RpcResponse::Render { text, cursor_x, cursor_y } => {
                     render_text = text;
+                    current_cursor_x = cursor_x;
+                    current_cursor_y = cursor_y;
                 }
                 RpcResponse::Shutdown => is_running = false,
             }
@@ -62,10 +67,10 @@ fn main() -> Result<(), io::Error> {
             let paragraph = Paragraph::new(render_text.as_str()).block(block);
             f.render_widget(paragraph, size);
 
-            let cursor_x = 1 + render_text.len() as u16;
-            let cursor_y = 1;
-
-            f.set_cursor(cursor_x, cursor_y);
+            f.set_cursor(
+                (current_cursor_x + 1) as u16,
+                (current_cursor_y + 1) as u16,
+            );
         })?;
 
         // Poll for user input events with a timeout to allow for UI updates.
@@ -77,6 +82,9 @@ fn main() -> Result<(), io::Error> {
                     }
                     KeyCode::Backspace => {
                         let _ = ui_tx.send(RpcRequest::DeleteChar);
+                    }
+                    KeyCode::Enter => {
+                        let _ = ui_tx.send(RpcRequest::InsertChar('\n'));
                     }
                     KeyCode::Char(c) => {
                         let _ = ui_tx.send(RpcRequest::InsertChar(c));

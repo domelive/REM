@@ -21,6 +21,8 @@ pub enum Direction {
 /// editor. Each variant of the enum corresponds to a different type of request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RpcRequest {
+    /// The `InsertNewline` variant represents a request to insert a newline character at the current cursor position.
+    InsertNewline,
     /// The `InsertChar` variant represents a request to insert a character at the current cursor position.
     InsertChar(char),
     /// The `DeleteChar` variant represents a request to delete the character at the current cursor position.
