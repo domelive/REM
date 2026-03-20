@@ -6,29 +6,18 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The `Direction` enum represents the possible directions that the cursor can move in.
-/// This enum is used in the `MoveCursor` variant of the `RpcRequest` enum to specify the direction
-/// in which the cursor should move.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
 /// The `RpcRequest` enum represents the different types of requests that the UI can send to the
 /// editor. Each variant of the enum corresponds to a different type of request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RpcRequest {
-    /// The `InsertNewline` variant represents a request to insert a newline character at the current cursor position.
-    InsertNewline,
-    /// The `InsertChar` variant represents a request to insert a character at the current cursor position.
-    InsertChar(char),
-    /// The `DeleteChar` variant represents a request to delete the character at the current cursor position.
-    DeleteChar,
-    /// The `MoveCursor` variant represents a request to move the cursor in a specific direction.
-    MoveCursor(Direction),
+    /// The `Char` variant represents a request to insert a character at the current cursor position.
+    Char(char),
+    /// The `Enter` variant represents a request to insert a newline character at the current cursor position.
+    Enter,
+    /// The `Backspace` variant represents a request to delete the character before the cursor.
+    Backspace,
+    /// The `Esc` variant represents a request to exit the current mode and return to normal mode.
+    Esc,
     /// The `Quit` variant represents a request to quit the editor.
     Quit,
 }
@@ -38,11 +27,13 @@ pub enum RpcRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RpcResponse {
     /// The `Render` variant represents a response that contains the text to be rendered on the UI,
-    /// as well as the cursor position.
+    /// as well as the cursor position and the name of the current mode.
+    /// The UI will use this information to update the display accordingly.
     Render {
         text: String,
         cursor_x: usize,
         cursor_y: usize,
+        mode_name: String,
     },
     /// The `Error` variant represents a response that contains an error message.
     Shutdown,

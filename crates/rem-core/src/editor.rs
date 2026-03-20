@@ -4,7 +4,7 @@
 //! The `Editor` struct also handles the cursor position and communicates with the UI through RPC
 //! messages.
 
-use crate::{piece_table::PieceTable, selection::Selection};
+use crate::{EditorAction, Mode, StateMachine, piece_table::PieceTable, selection::Selection};
 use rem_rpc::{RpcRequest, RpcResponse};
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -18,6 +18,7 @@ pub struct Editor {
     selections: Vec<Selection>,
     /// The `main_selection_idx` field is an index into the `selections` vector that indicates which selection is currently active or primary.
     main_selection_idx: usize,
+    fsm: StateMachine,
 }
 
 impl Editor {
@@ -26,6 +27,7 @@ impl Editor {
             buffer: PieceTable::new(initial_text),
             selections: vec![Selection::point(0)],
             main_selection_idx: 0,
+            fsm: StateMachine::new(),
         }
     }
 
@@ -41,81 +43,32 @@ impl Editor {
         self.broadcast_state(&tx);
 
         for req in rx {
-            match req {
-                RpcRequest::InsertNewline => {
-                    // NOTE: For now we only support the main selection. In the future, we just iterate
-                    // over all selections and apply the insertions to each of them.
-                    let main_selection = &mut self.selections[self.main_selection_idx];
-                    let (start, end) = main_selection.range();
+            let action = self.fsm.process_input(req.clone());
 
-                    // If the selection is not a point, we delete the selected text first.
-                    if start != end {
-                        self.buffer.delete(start, end);
-                        main_selection.head = start;
-                        main_selection.collapse();
-                    }
-
-                    self.buffer.insert(main_selection.head, "\n");
-
-                    // TODO: We need to move the cursor to the beginning of the next line after
-                    // inserting a newline.
-                }
-
-                // When an `InsertChar` request is received, the editor inserts the specified
-                // character at the current cursor position in the text buffer and moves the cursor
-                // to the right.
-                RpcRequest::InsertChar(c) => {
-                    // NOTE: For now we only support the main selection. In the future, we just iterate
-                    // over all selections and apply the insertions to each of them.
-                    let main_selection = &mut self.selections[self.main_selection_idx];
-                    let (start, end) = main_selection.range();
-
-                    // If the selection is not a point, we delete the selected text first.
-                    if start != end {
-                        self.buffer.delete(start, end);
-                        main_selection.head = start;
-                        main_selection.collapse();
-                    }
-
-                    self.buffer.insert(main_selection.head, &c.to_string());
-
-                    // Move the cursor to the right after insertion.
-                    main_selection.head += 1;
-                    main_selection.collapse();
-                }
-
-                // When a `DeleteChar` request is received, the editor deletes the character at the
-                // current cursor position in the text buffer and moves the cursor to the left if
-                // it's not at the beginning of the buffer.
-                RpcRequest::DeleteChar => {
-                    // NOTE: For now we only support the main selection. In the future, we just iterate
-                    // over all selections and apply the deletion to each of them.
-                    let main_selection = &mut self.selections[self.main_selection_idx];
-                    let (start, end) = main_selection.range();
-
-                    // If the selection is not a point, we delete the selected text first.
-                    if start != end {
-                        self.buffer.delete(start, end - start);
-                        main_selection.head = start;
-                        main_selection.collapse();
-                    } else if main_selection.head > 0 {
-                        // Delete the character before the cursor and move the cursor to the left.
-                        self.buffer.delete(main_selection.head - 1, 1);
-                        main_selection.head -= 1;
-                        main_selection.collapse();
-
-                    }
-                }
-
-                // When a `MoveCursor` request is received, the editor moves the cursor in the
-                // specified direction, ensuring that the cursor does not go out of bounds of the
-                // text buffer.
-                RpcRequest::Quit => {
+            match action {
+                EditorAction::Quit => {
                     let _ = tx.send(RpcResponse::Shutdown);
                     break;
                 }
-
-                _ => {}
+                EditorAction::ChangeMode(_) => {}
+                EditorAction::InsertText(text) => self.insert_text(&text),
+                EditorAction::DeleteBackwards => self.delete_backwards(),
+                EditorAction::MoveLeft => {
+                    let sel = &mut self.selections[self.main_selection_idx];
+                    if sel.head > 0 {
+                        sel.head -= 1;
+                        sel.anchor = sel.head;
+                    }
+                }
+                EditorAction::MoveRight => {
+                    let len = self.buffer.get_text().len();
+                    let sel = &mut self.selections[self.main_selection_idx];
+                    if sel.head < len {
+                        sel.head += 1;
+                        sel.anchor = sel.head;
+                    }
+                }
+                EditorAction::DoNothing => {}
             }
 
             self.broadcast_state(&tx);
@@ -124,6 +77,53 @@ impl Editor {
 }
 
 impl Editor {
+    /// The `insert_text` method handles the insertion of text at the current cursor position.
+    ///
+    /// If there is a selection (i.e., the anchor and head are at different positions), it first deletes the
+    /// selected text before inserting the new text.
+    /// After inserting the text, it updates the cursor position to be after the newly inserted text.
+    ///
+    /// # Arguments
+    /// - `text`: The text to be inserted at the current cursor position.
+    fn insert_text(&mut self, text: &str) {
+        let sel = &mut self.selections[self.main_selection_idx];
+        let start = sel.min();
+        let end = sel.max();
+
+        if start != end {
+            self.buffer.delete(start, end - start);
+            sel.anchor = start;
+            sel.head = start;
+        }
+
+        self.buffer.insert(sel.head, text);
+
+        sel.head += text.len();
+        sel.anchor = sel.head;
+    }
+
+    /// The `delete_backwards` method handles the deletion of text when the user presses the backspace key.
+    ///
+    /// If there is a selection (i.e., the anchor and head are at different positions), it deletes the selected text.
+    ///
+    /// If there is no selection and the cursor is not at the beginning of the text,
+    /// it deletes the character immediately before the cursor and moves the cursor back by one position.
+    fn delete_backwards(&mut self) {
+        let sel = &mut self.selections[self.main_selection_idx];
+        let start = sel.min();
+        let end = sel.max();
+
+        if start != end {
+            self.buffer.delete(start, end - start);
+            sel.anchor = start;
+            sel.head = start;
+        } else if sel.head > 0 {
+            self.buffer.delete(sel.head - 1, 1);
+            sel.head -= 1;
+            sel.anchor = sel.head;
+        }
+    }
+
     /// The `calculate_cursor_coords` method calculates the (x, y) coordinates of the cursor based
     /// on the current cursor position in the text buffer.
     ///
@@ -131,10 +131,12 @@ impl Editor {
     /// into 2D coordinates (x, y) where x is the column number and y is the line number.
     fn calculate_cursor_coords(&self) -> (usize, usize) {
         let text = self.buffer.get_text();
-        
+
         // We take the minimum of the cursor position and the text length to avoid out-of-bounds
         // access.
-        let offset = self.selections[self.main_selection_idx].head.min(text.len());
+        let offset = self.selections[self.main_selection_idx]
+            .head
+            .min(text.len());
         // We take the substring of the text up to the cursor position and split it into lines to
         // calculate the line and column numbers.
         let prefix = &text[..offset];
@@ -158,10 +160,18 @@ impl Editor {
     fn broadcast_state(&self, tx: &Sender<RpcResponse>) {
         let (cursor_x, cursor_y) = self.calculate_cursor_coords();
 
+        let mode_name = match self.fsm.current_mode {
+            Mode::Normal => "NORMAL",
+            Mode::Insert => "INSERT",
+            Mode::Visual => "VISUAL",
+        }
+        .to_string();
+
         let response = RpcResponse::Render {
             text: self.buffer.get_text(),
             cursor_x,
             cursor_y,
+            mode_name,
         };
 
         let _ = tx.send(response);
